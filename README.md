@@ -45,21 +45,38 @@ measure sound loading and playback latency.
 import PulseKit
 
 PulseKit.configure(
-    .init(environment: .development, exporters: [.console, .localFile])
+    .init(
+        environment: .development,
+        sampleRate: 1.0,
+        deviceContext: .basic,
+        installationIdentifier: .sessionOnly
+    )
 )
 
-PulseKit.track("checkout_started", metadata: [
-    "payment_method": "apple_pay"
-])
-
-let span = PulseKit.startSpan("create_order")
-defer { span.finish() }
-
-// Perform asynchronous or synchronous work.
+PulseKit.track(
+    "order_creation_failed",
+    service: "OrdersAPI",
+    operation: "POST /orders",
+    level: .error,
+    metadata: ["http_status": "503", "retry_attempt": "2"]
+)
 ```
 
-The first public building blocks will be `PulseEvent`, `PulseSpan`,
-`PulseConfiguration`, and interchangeable exporters.
+`PulseConfiguration`, structured events, and the console exporter are the
+first public building blocks. Spans and local-file export follow next.
+
+## Installation
+
+Add PulseKit to an iOS app in Xcode via **File → Add Package Dependencies…**
+and enter:
+
+```
+https://github.com/yanCerv/PulseKit.git
+```
+
+Use the `main` branch while developing PulseKit. Once the first release is
+tagged (for example, `0.1.0`), consuming apps should use SwiftPM's **Up to Next
+Major Version** rule from that tag instead.
 
 ## First release scope
 
