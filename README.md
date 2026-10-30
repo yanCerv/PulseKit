@@ -29,41 +29,15 @@ measure sound loading and playback latency.
 ## Principles
 
 1. **Private by default.** No network traffic is required or enabled by
-   default. Sensitive keys are redacted before an event is stored or exported.
-2. **Local-first.** Events can go to the Xcode console or a local JSONL file,
-   making the SDK useful before any service exists.
+   default. The initial API is designed for safe, technical metadata only.
+2. **Local-first.** Events currently go to the Xcode console, making the SDK
+   useful before any service exists. Local JSONL export is planned.
 3. **Explicit configuration.** Sampling, environments, persistence, exporters,
    and redaction rules are opt-in and visible in app code.
 4. **Small, stable public API.** The SDK should be simple to integrate and
    careful about source and binary compatibility.
 5. **Useful diagnostics, not surveillance.** Collect technical context that
    improves an app; avoid identifying people.
-
-## Intended API
-
-```swift
-import PulseKit
-
-PulseKit.configure(
-    .init(
-        environment: .development,
-        sampleRate: 1.0,
-        deviceContext: .basic,
-        installationIdentifier: .sessionOnly
-    )
-)
-
-PulseKit.track(
-    "order_creation_failed",
-    service: "OrdersAPI",
-    operation: "POST /orders",
-    level: .error,
-    metadata: ["http_status": "503", "retry_attempt": "2"]
-)
-```
-
-`PulseConfiguration`, structured events, and the console exporter are the
-first public building blocks. Spans and local-file export follow next.
 
 ## Installation
 
@@ -74,9 +48,113 @@ and enter:
 https://github.com/yanCerv/PulseKit.git
 ```
 
-Use the `main` branch while developing PulseKit. Once the first release is
-tagged (for example, `0.1.0`), consuming apps should use SwiftPM's **Up to Next
-Major Version** rule from that tag instead.
+Select **Up to Next Major Version** starting at `0.1.0`, then add the
+`PulseKit` library to the app target.
+
+## Configure PulseKit
+
+Import and configure PulseKit once during application startup, before making
+service calls. A SwiftUI app can do this in its `App` initializer:
+
+```swift
+import PulseKit
+
+@main
+struct TicketSellerApp: App {
+    init() {
+        PulseKit.configure(
+            .init(
+                environment: .production,
+                sampleRate: 1.0
+            )
+        )
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+```
+
+| Setting | Purpose | Default |
+| --- | --- | --- |
+| `environment` | Labels the source of diagnostics: `.development`, `.staging`, `.production`, or `.custom("…")`. | Required |
+| `isEnabled` | Turns PulseKit recording on or off. | `true` |
+| `sampleRate` | Records a proportion from `0` to `1` of eligible events. Values outside that range are clamped. | `1` |
+| `deviceContext` | Reserves the policy for future technical device context collection. No device context is emitted in `0.1.0`. | `.basic` |
+| `installationIdentifier` | Reserves the policy for future resettable installation correlation. Events currently use a random session ID only. | `.sessionOnly` |
+| `exporters` | Destinations that receive events. | `[ConsoleExporter()]` |
+
+`ConsoleExporter` is the default and prints structured diagnostics to the
+Xcode console. PulseKit does not send data to a server.
+
+## Log service diagnostics
+
+Use `PulseKit.track` at service boundaries: failed network responses, retries,
+unexpected decoding failures, or an operation that needs attention. It returns
+the emitted `PulseEvent`, or `nil` when recording is disabled or an event is
+not selected by sampling.
+
+```swift
+@discardableResult
+func recordFailedOrderRequest(statusCode: Int, retryAttempt: Int) -> PulseEvent? {
+    PulseKit.track(
+        "order_creation_failed",
+        service: "OrdersAPI",
+        operation: "POST /orders",
+        level: .error,
+        metadata: [
+            "http_status": String(statusCode),
+            "retry_attempt": String(retryAttempt),
+            "error_code": "service_unavailable"
+        ]
+    )
+}
+```
+
+The public logging method is:
+
+```swift
+@discardableResult
+PulseKit.track(
+    _ name: String,
+    service: String? = nil,
+    operation: String? = nil,
+    level: PulseLevel = .info,
+    metadata: [String: String] = [:]
+) -> PulseEvent?
+```
+
+Use stable, non-identifying values:
+
+- `name`: an action-oriented identifier such as `request_failed` or
+  `payment_authorization_failed`.
+- `service`: the technical dependency, such as `OrdersAPI` or `PaymentsAPI`.
+- `operation`: an HTTP method and templated path, such as `POST /orders`.
+- `level`: `.debug`, `.info`, `.warning`, or `.error`.
+- `metadata`: status codes, internal error codes, retry counts, or feature
+  flags represented as strings.
+
+Every event includes a UUID, timestamp, severity, random session ID, service,
+operation, and metadata. The console output is deterministic enough to filter
+by `event=`, `service=`, `operation=`, or `session=`.
+
+## Privacy rules
+
+Do not put any of the following in `metadata`, `service`, `operation`, or an
+event name:
+
+- Names, email addresses, phone numbers, account IDs, or other user data.
+- Access tokens, cookies, authorization headers, API keys, or passwords.
+- HTTP request/response bodies or a full URL with query parameters.
+- Device serial numbers, advertising identifiers, or device names.
+
+Use a stable internal `error_code`, HTTP status, retry count, and a templated
+operation path instead. Automatic metadata redaction and JSONL local-file
+export are planned future work; callers are responsible for respecting these
+rules in `0.1.0`.
 
 ## First release scope
 
